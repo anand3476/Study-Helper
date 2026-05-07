@@ -5,7 +5,7 @@ import {
   PanelLeftClose, PanelLeftOpen, Maximize2, Loader2, Sparkles,
   Network, Globe, Link2, ListChecks, Bold, Italic, Heading,
   Heading1, Heading2, Heading3, Table as TableIcon, PenTool, 
-  Workflow, MessageSquareWarning, Type, Brush, Trash2, Search
+  Workflow, MessageSquareWarning, Type
 } from 'lucide-react';
 
 const API_KEY = ""; // Canvas will auto-inject the key here
@@ -80,41 +80,11 @@ function base64ToArrayBuffer(base64) {
   return bytes.buffer;
 }
 
-// New shared vector drawing function
-const drawStrokes = (ctx, strokes, activeStroke = null) => {
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.fillStyle = '#18181b'; // zinc-900
-  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-
-  const allStrokes = activeStroke ? [...strokes, activeStroke] : strokes;
-
-  allStrokes.forEach(stroke => {
-    if (!stroke.points || stroke.points.length === 0) return;
-    ctx.beginPath();
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = stroke.width;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-    for (let i = 1; i < stroke.points.length; i++) {
-       ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
-    }
-    ctx.stroke();
-  });
-};
-
 // Upgraded markdown parser to handle advanced syntax (Mermaid, Tables, Callouts)
 function parseMarkdown(text) {
   if (!text) return { __html: '' };
 
   let html = text;
-
-  // 0. Extract Vector Drawings first
-  const drawingBlocks = [];
-  html = html.replace(/```drawing\n([\s\S]*?)```/g, (match, json) => {
-    drawingBlocks.push(json);
-    return `___DRAWING_BLOCK_${drawingBlocks.length - 1}___`;
-  });
 
   // 1. Extract Code Blocks (including Mermaid) to prevent formatting corruption
   const codeBlocks = [];
@@ -168,9 +138,8 @@ function parseMarkdown(text) {
   // 4. Transform Newlines to HTML line breaks
   html = html.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>');
 
-  // 5. Inline formats & Images
+  // 5. Inline formats
   html = html
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<div class="my-4 flex justify-center"><img src="$2" alt="$1" class="max-w-full rounded-lg border border-zinc-700 shadow-md bg-zinc-900 max-h-[400px] object-contain" /></div>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/==(.*?)==/g, '<mark class="bg-yellow-500/30 text-yellow-200 rounded px-1">$1</mark>')
@@ -189,27 +158,11 @@ function parseMarkdown(text) {
     html = html.replace(`___CODE_BLOCK_${index}___`, replacement);
   });
 
-  // 7. Restore Vector Drawings
-  drawingBlocks.forEach((json, index) => {
-    const encodedJson = encodeURIComponent(json);
-    html = html.replace(`___DRAWING_BLOCK_${index}___`, `<div class="drawing-preview-container my-4 relative group border border-zinc-700 rounded-lg bg-zinc-900 overflow-hidden" data-drawing="${encodedJson}">
-        <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 z-10">
-           <button class="edit-drawing-btn p-1.5 bg-blue-600 hover:bg-blue-500 rounded text-white shadow transition-colors" title="Edit Drawing">
-             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-           </button>
-           <button class="delete-drawing-btn p-1.5 bg-red-600 hover:bg-red-500 rounded text-white shadow transition-colors" title="Delete Drawing">
-             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-           </button>
-        </div>
-        <canvas class="preview-canvas w-full h-auto" width="800" height="500"></canvas>
-    </div>`);
-  });
-
   return { __html: `<p>${html}</p>` };
 }
 
 // Wrapper component to securely parse markdown and initialize Mermaid diagrams
-const MarkdownPreview = ({ content, onLinkClick, onEditDrawing, onDeleteDrawing }) => {
+const MarkdownPreview = ({ content, onLinkClick }) => {
     const containerRef = useRef(null);
 
     useEffect(() => {
@@ -242,30 +195,7 @@ const MarkdownPreview = ({ content, onLinkClick, onEditDrawing, onDeleteDrawing 
             script.onload = () => renderMermaid();
             document.head.appendChild(script);
         }
-
-        // Render vector drawings
-        const drawingNodes = containerRef.current.querySelectorAll('.drawing-preview-container');
-        drawingNodes.forEach(node => {
-            const canvas = node.querySelector('.preview-canvas');
-            const ctx = canvas.getContext('2d');
-            const encodedData = node.getAttribute('data-drawing');
-            const jsonStr = decodeURIComponent(encodedData);
-            
-            try {
-                const data = JSON.parse(jsonStr);
-                drawStrokes(ctx, data.strokes || []);
-                
-                const editBtn = node.querySelector('.edit-drawing-btn');
-                const delBtn = node.querySelector('.delete-drawing-btn');
-                
-                editBtn.onclick = () => onEditDrawing(data.id, jsonStr);
-                delBtn.onclick = () => onDeleteDrawing(data.id);
-            } catch(e) {
-                console.error("Failed to render drawing", e);
-            }
-        });
-
-    }, [content, onEditDrawing, onDeleteDrawing]);
+    }, [content]);
 
     return (
         <div
@@ -414,71 +344,23 @@ export default function App() {
   const [noteEditMode, setNoteEditMode] = useState(false);
   const [viewMode, setViewMode] = useState('document'); // 'document' | 'graph'
   
-  // Feature States (Chat, Audio, Webpage Gen)
+  const textareaRef = useRef(null);
+
+  // Generator State
   const [chatInput, setChatInput] = useState('');
   const [isChatting, setIsChatting] = useState(false);
-  const chatEndRef = useRef(null);
-  
-  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [audioUrl, setAudioUrl] = useState(null);
-  
+  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [generatedHtml, setGeneratedHtml] = useState(null);
   const [isGeneratingHtml, setIsGeneratingHtml] = useState(false);
   const [showWebpageModal, setShowWebpageModal] = useState(false);
-  const [generatedHtml, setGeneratedHtml] = useState(null);
 
-  // Search State
-  const [showSearchModal, setShowSearchModal] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  // Resize State
-  const [sidebarWidth, setSidebarWidth] = useState(256);
-  const [rightPanelWidth, setRightPanelWidth] = useState(384);
-  const [isDraggingLeft, setIsDraggingLeft] = useState(false);
-  const [isDraggingRight, setIsDraggingRight] = useState(false);
-  const [showDrawingModal, setShowDrawingModal] = useState(false);
-  
-  // Editor / Drawing State
-  const textareaRef = useRef(null);
-  const drawingCanvasRef = useRef(null);
-  const [isDrawingOnCanvas, setIsDrawingOnCanvas] = useState(false);
-  const [brushColor, setBrushColor] = useState('#60a5fa');
-  const [drawingStrokes, setDrawingStrokes] = useState([]);
-  const [currentStroke, setCurrentStroke] = useState(null);
-  const [editingDrawingId, setEditingDrawingId] = useState(null);
+  const chatEndRef = useRef(null);
 
   // Scroll to bottom of chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory]);
-
-  // Sidebar Drag Resizing Logic
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (isDraggingLeft) {
-        setSidebarWidth(Math.max(200, Math.min(e.clientX, 600)));
-      } else if (isDraggingRight) {
-        setRightPanelWidth(Math.max(250, Math.min(window.innerWidth - e.clientX, 800)));
-      }
-    };
-    
-    const handleMouseUp = () => {
-      setIsDraggingLeft(false);
-      setIsDraggingRight(false);
-    };
-
-    if (isDraggingLeft || isDraggingRight) {
-      document.body.style.userSelect = 'none'; // Prevent text selection while dragging
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    } else {
-      document.body.style.userSelect = '';
-    }
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDraggingLeft, isDraggingRight]);
 
   const handleAddNote = () => {
     const newNote = {
@@ -510,14 +392,14 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const executeWebSearch = async () => {
-    if (!searchQuery.trim()) return;
+  const handleAddWebsite = async () => {
+    const query = prompt("Enter a Topic to search or a Website URL:");
+    if (!query) return;
     
-    setShowSearchModal(false);
     setIsGeneratingHtml(true); 
     try {
       const payload = {
-        contents: [{ parts: [{ text: `Search the web for the following topic or URL and provide a comprehensive, detailed summary of the main informational content. \n\nQuery: ${searchQuery}\n\nReturn ONLY a JSON object: {"title": "Descriptive Title", "content": "Detailed text content here..."}` }] }],
+        contents: [{ parts: [{ text: `Search the web for the following topic or URL and provide a comprehensive, detailed summary of the main informational content. \n\nQuery: ${query}\n\nReturn ONLY a JSON object: {"title": "Descriptive Title", "content": "Detailed text content here..."}` }] }],
         tools: [{ "google_search": {} }],
       };
       
@@ -540,31 +422,18 @@ export default function App() {
       
       const newSource = {
         id: `src-${Date.now()}`,
-        title: parsed.title || `Search: ${searchQuery}`,
+        title: parsed.title || `Search: ${query}`,
         content: parsed.content || 'Content could not be parsed clearly.'
       };
       setSources([...sources, newSource]);
       setActiveItem({ type: 'source', id: newSource.id });
       setViewMode('document');
       setNoteEditMode(true);
-      setSearchQuery('');
     } catch (error) {
       console.error(error);
+      alert("Failed to extract website content.");
     } finally {
       setIsGeneratingHtml(false);
-    }
-  };
-
-  const handleDeleteItem = (e, type, id) => {
-    e.stopPropagation();
-    if (type === 'note') {
-        const newNotes = notes.filter(n => n.id !== id);
-        setNotes(newNotes);
-        if (activeItem.id === id) setActiveItem(newNotes.length ? {type: 'note', id: newNotes[0].id} : null);
-    } else {
-        const newSources = sources.filter(s => s.id !== id);
-        setSources(newSources);
-        if (activeItem.id === id) setActiveItem(newSources.length ? {type: 'source', id: newSources[0].id} : null);
     }
   };
 
@@ -591,101 +460,6 @@ export default function App() {
       textareaRef.current.focus();
       textareaRef.current.setSelectionRange(start + prefix.length, end + prefix.length);
     }, 0);
-  };
-
-  // --- Editable Vector Drawing Logic ---
-  
-  const openNewDrawing = () => {
-      setDrawingStrokes([]);
-      setCurrentStroke(null);
-      setEditingDrawingId(null);
-      setShowDrawingModal(true);
-  };
-
-  const openEditDrawing = (id, jsonString) => {
-      try {
-          const data = JSON.parse(jsonString);
-          setDrawingStrokes(data.strokes || []);
-          setCurrentStroke(null);
-          setEditingDrawingId(id);
-          setShowDrawingModal(true);
-      } catch(e) {
-          console.error("Parse drawing error", e);
-      }
-  };
-
-  const handleDeleteDrawing = (id) => {
-       if (!activeDoc) return;
-       const regex = new RegExp(`\\\`\\\`\\\`drawing\\n{"id":"${id}"[\\s\\S]*?\\n\\\`\\\`\\\`\\n?`, 'g');
-       const newContent = activeDoc.content.replace(regex, '');
-       updateActiveDoc('content', newContent);
-  };
-
-  const handleSaveDrawing = () => {
-    const drawingId = editingDrawingId || `draw-${Date.now()}`;
-    const drawingData = { id: drawingId, strokes: drawingStrokes };
-    const jsonString = JSON.stringify(drawingData);
-    const block = `\n\`\`\`drawing\n${jsonString}\n\`\`\`\n`;
-
-    if (editingDrawingId) {
-        // Replace existing block
-        const regex = new RegExp(`\\\`\\\`\\\`drawing\\n{"id":"${editingDrawingId}"[\\s\\S]*?\\n\\\`\\\`\\\`\\n?`, 'g');
-        const newContent = activeDoc.content.replace(regex, block);
-        updateActiveDoc('content', newContent);
-    } else {
-        // Insert new block at cursor
-        insertFormatting(block);
-    }
-    setShowDrawingModal(false);
-  };
-
-  // Redraw canvas in modal when strokes change
-  useEffect(() => {
-    if (showDrawingModal && drawingCanvasRef.current) {
-        const ctx = drawingCanvasRef.current.getContext('2d');
-        drawStrokes(ctx, drawingStrokes, currentStroke);
-    }
-  }, [drawingStrokes, currentStroke, showDrawingModal]);
-
-  const getCanvasCoords = (e) => {
-    const canvas = drawingCanvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return {
-      x: (clientX - rect.left) * (canvas.width / rect.width),
-      y: (clientY - rect.top) * (canvas.height / rect.height)
-    };
-  };
-
-  const startDrawing = (e) => {
-    e.preventDefault();
-    setIsDrawingOnCanvas(true);
-    const coords = getCanvasCoords(e);
-    setCurrentStroke({ 
-        color: brushColor, 
-        width: brushColor === '#18181b' ? 20 : 3, 
-        points: [coords] 
-    });
-  };
-
-  const drawOnCanvas = (e) => {
-    e.preventDefault();
-    if (!isDrawingOnCanvas || !currentStroke) return;
-    const coords = getCanvasCoords(e);
-    setCurrentStroke(prev => ({ 
-        ...prev, 
-        points: [...prev.points, coords] 
-    }));
-  };
-
-  const stopDrawing = () => {
-     if (!isDrawingOnCanvas) return;
-     setIsDrawingOnCanvas(false);
-     if (currentStroke) {
-        setDrawingStrokes(prev => [...prev, currentStroke]);
-        setCurrentStroke(null);
-     }
   };
 
   const buildContextString = () => {
@@ -870,11 +644,8 @@ export default function App() {
     <div className="flex h-screen w-full bg-zinc-950 text-zinc-300 font-sans overflow-hidden">
       
       {/* SIDEBAR */}
-      <div 
-        style={{ width: sidebarOpen ? sidebarWidth : 0 }} 
-        className={`${!isDraggingLeft && !isDraggingRight ? 'transition-all duration-300' : ''} border-r border-zinc-800 bg-zinc-900 flex flex-col shrink-0 overflow-hidden relative`}
-      >
-        <div className="p-4 border-b border-zinc-800 flex items-center justify-between min-w-[200px]">
+      <div className={`${sidebarOpen ? 'w-64' : 'w-0'} transition-all duration-300 border-r border-zinc-800 bg-zinc-900 flex flex-col shrink-0 overflow-hidden`}>
+        <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
           <span className="font-bold text-zinc-100 flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-blue-400" /> StudyHub
           </span>
@@ -892,19 +663,16 @@ export default function App() {
             </div>
             <div className="space-y-1">
               {notes.map(note => (
-                <div key={note.id} className={`group w-full text-left px-3 py-2 rounded-md text-sm flex items-center justify-between cursor-pointer ${
+                <button
+                  key={note.id}
+                  onClick={() => setActiveItem({ type: 'note', id: note.id })}
+                  className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 truncate ${
                     activeItem.id === note.id ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-zinc-800'
                   }`}
-                  onClick={() => setActiveItem({ type: 'note', id: note.id })}
                 >
-                  <div className="flex items-center gap-2 truncate flex-1">
-                      <FileText className="w-4 h-4 shrink-0" />
-                      <span className="truncate">{note.title || 'Untitled'}</span>
-                  </div>
-                  <button onClick={(e) => handleDeleteItem(e, 'note', note.id)} className="opacity-0 group-hover:opacity-100 p-1 hover:bg-zinc-700 rounded text-red-400 hover:text-red-300 transition-all shrink-0" title="Delete Note">
-                      <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                  <FileText className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{note.title || 'Untitled'}</span>
+                </button>
               ))}
             </div>
           </div>
@@ -913,11 +681,9 @@ export default function App() {
           <div>
             <div className="flex items-center justify-between mb-2 px-2">
               <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Sources</span>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setShowSearchModal(true)} className="flex items-center gap-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-2 py-1 rounded transition-colors" title="Web Search">
-                    <Search className="w-3 h-3" /> <span className="hidden lg:inline">Search</span>
-                </button>
-                <label className="hover:bg-zinc-700 bg-zinc-800 p-1 rounded text-zinc-300 cursor-pointer transition-colors" title="Upload File">
+              <div className="flex items-center gap-3">
+                <button onClick={handleAddWebsite} className="hover:text-zinc-100 text-zinc-400" title="Web Search / Add URL"><Globe className="w-4 h-4" /></button>
+                <label className="hover:text-zinc-100 text-zinc-400 cursor-pointer" title="Upload File">
                   <Upload className="w-4 h-4" />
                   <input type="file" className="hidden" accept=".txt,.md" onChange={handleFileUpload} />
                 </label>
@@ -925,32 +691,21 @@ export default function App() {
             </div>
             <div className="space-y-1">
               {sources.map(src => (
-                <div key={src.id} className={`group w-full text-left px-3 py-2 rounded-md text-sm flex items-center justify-between cursor-pointer ${
+                <button
+                  key={src.id}
+                  onClick={() => setActiveItem({ type: 'source', id: src.id })}
+                  className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center gap-2 truncate ${
                     activeItem.id === src.id ? 'bg-blue-600/20 text-blue-400' : 'hover:bg-zinc-800'
                   }`}
-                  onClick={() => setActiveItem({ type: 'source', id: src.id })}
                 >
-                  <div className="flex items-center gap-2 truncate flex-1">
-                      <Book className="w-4 h-4 shrink-0" />
-                      <span className="truncate">{src.title}</span>
-                  </div>
-                  <button onClick={(e) => handleDeleteItem(e, 'source', src.id)} className="opacity-0 group-hover:opacity-100 p-1 hover:bg-zinc-700 rounded text-red-400 hover:text-red-300 transition-all shrink-0" title="Delete Source">
-                      <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                  <Book className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{src.title}</span>
+                </button>
               ))}
             </div>
           </div>
         </div>
       </div>
-
-      {/* DRAG HANDLE LEFT */}
-      {sidebarOpen && (
-        <div 
-          onMouseDown={() => setIsDraggingLeft(true)}
-          className={`w-1 z-20 cursor-col-resize shrink-0 hover:bg-blue-500/50 transition-colors ${isDraggingLeft ? 'bg-blue-500' : 'bg-transparent'}`}
-        />
-      )}
 
       {/* MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col min-w-0">
@@ -1061,7 +816,6 @@ export default function App() {
                       <div className="w-px bg-zinc-800 mx-1"></div>
                       
                       {/* Objects */}
-                      <button onClick={openNewDrawing} className="p-1.5 text-zinc-400 hover:text-blue-400 hover:bg-blue-900/20 rounded" title="Inline Editable Drawing"><Brush className="w-3.5 h-3.5" /></button>
                       <button onClick={() => insertFormatting('\n| Header 1 | Header 2 |\n|---|---|\n| Cell 1 | Cell 2 |\n')} className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded" title="Table"><TableIcon className="w-3.5 h-3.5" /></button>
                       <button onClick={() => insertFormatting('\n```mermaid\ngraph TD;\n    A-->B;\n    A-->C;\n    B-->D;\n    C-->D;\n```\n')} className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded" title="Flowchart"><Workflow className="w-3.5 h-3.5" /></button>
                       <button onClick={() => insertFormatting('\n> [!info] Callout Title\n> Enter your important note here...\n\n')} className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded" title="Highlight Box"><MessageSquareWarning className="w-3.5 h-3.5" /></button>
@@ -1087,8 +841,6 @@ export default function App() {
                   <MarkdownPreview 
                     content={activeDoc.content} 
                     onLinkClick={handleLinkClick} 
-                    onEditDrawing={openEditDrawing}
-                    onDeleteDrawing={handleDeleteDrawing}
                   />
                 )}
               </div>
@@ -1100,20 +852,9 @@ export default function App() {
             )}
           </div>
 
-          {/* DRAG HANDLE RIGHT */}
-          {rightPanel && (
-            <div 
-              onMouseDown={() => setIsDraggingRight(true)}
-              className={`w-1 z-20 cursor-col-resize shrink-0 hover:bg-blue-500/50 transition-colors ${isDraggingRight ? 'bg-blue-500' : 'bg-transparent'}`}
-            />
-          )}
-
           {/* Right Panel (Chat / Audio) */}
-          <div 
-            style={{ width: rightPanel ? rightPanelWidth : 0 }} 
-            className={`${!isDraggingRight && !isDraggingLeft ? 'transition-all duration-300' : ''} ${rightPanel ? 'border-l border-zinc-800' : 'border-transparent'} shrink-0 bg-zinc-900/30 flex flex-col relative overflow-hidden`}
-          >
-            <div style={{ width: rightPanel ? rightPanelWidth : 0 }} className="h-full flex flex-col shrink-0 min-w-[250px]">
+          <div className={`${rightPanel ? 'w-80 lg:w-96 border-l border-zinc-800' : 'w-0 border-transparent'} transition-all duration-300 shrink-0 bg-zinc-900/30 flex flex-col relative overflow-hidden`}>
+            <div className="w-80 lg:w-96 h-full flex flex-col shrink-0">
             {rightPanel === 'chat' && (
               <>
                 <div className="p-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
@@ -1237,36 +978,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Search Modal */}
-      {showSearchModal && (
-        <div className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
-           <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-lg p-6 shadow-2xl flex flex-col gap-4 transform transition-all scale-100">
-               <div className="flex items-center gap-3 text-zinc-100">
-                   <Search className="w-5 h-5 text-blue-400" />
-                   <h2 className="text-lg font-semibold">Web Search & Extract</h2>
-               </div>
-               <p className="text-sm text-zinc-400">Enter a topic or a specific URL. The AI will browse the web and synthesize the information into a new Source document.</p>
-               <input 
-                  autoFocus
-                  type="text" 
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-zinc-100 outline-none focus:border-blue-500 transition-colors"
-                  placeholder="e.g., Timeline of the Roman Empire..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => { if(e.key === 'Enter') executeWebSearch(); }}
-               />
-               <div className="flex justify-end gap-3 mt-2">
-                   <button onClick={() => setShowSearchModal(false)} className="px-4 py-2 rounded-lg text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition-colors">
-                       Cancel
-                   </button>
-                   <button onClick={executeWebSearch} disabled={!searchQuery.trim()} className="px-5 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
-                       <Sparkles className="w-4 h-4" /> Extract Source
-                   </button>
-               </div>
-           </div>
-        </div>
-      )}
-
       {showWebpageModal && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 lg:p-8 backdrop-blur-sm">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full h-full max-w-6xl shadow-2xl flex flex-col overflow-hidden relative transform transition-all">
@@ -1308,66 +1019,6 @@ export default function App() {
               ) : (
                 <p className="text-zinc-500">Failed to generate content.</p>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Drawing Modal */}
-      {showDrawingModal && (
-        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden max-w-4xl w-full">
-            <div className="h-14 bg-zinc-800/50 border-b border-zinc-800 flex items-center justify-between px-4 shrink-0">
-              <div className="flex items-center gap-3">
-                <Brush className="w-5 h-5 text-blue-400" />
-                <h2 className="font-semibold text-zinc-100">Inline Whiteboard</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-zinc-800 p-1 rounded-lg mr-4">
-                  {['#ffffff', '#60a5fa', '#34d399', '#fbbf24', '#f87171', '#18181b'].map(c => (
-                    <button 
-                      key={c}
-                      onClick={() => setBrushColor(c)}
-                      className={`w-6 h-6 rounded-full border-2 ${brushColor === c ? 'border-white scale-110' : 'border-transparent hover:scale-110'} transition-transform flex items-center justify-center`}
-                      style={{ backgroundColor: c }}
-                      title={c === '#18181b' ? 'Eraser' : 'Color'}
-                    >
-                      {c === '#18181b' && <span className="text-[10px] text-zinc-500">Era</span>}
-                    </button>
-                  ))}
-                </div>
-                <button 
-                  onClick={() => { setDrawingStrokes([]); setCurrentStroke(null); }}
-                  className="px-3 py-1.5 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors"
-                >
-                  Clear
-                </button>
-                <button 
-                  onClick={handleSaveDrawing}
-                  className="px-4 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded transition-colors shadow-lg"
-                >
-                  Save & Insert
-                </button>
-                <button onClick={() => setShowDrawingModal(false)} className="p-2 hover:bg-zinc-700 rounded-full text-zinc-400 hover:text-white ml-2">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-            
-            <div className="p-4 flex items-center justify-center bg-zinc-950 overflow-hidden">
-               <canvas
-                  ref={drawingCanvasRef}
-                  width={800}
-                  height={500}
-                  className="bg-zinc-900 border border-zinc-800 rounded-lg shadow-inner cursor-crosshair touch-none w-full max-w-full h-auto"
-                  onMouseDown={startDrawing}
-                  onMouseMove={drawOnCanvas}
-                  onMouseUp={stopDrawing}
-                  onMouseOut={stopDrawing}
-                  onTouchStart={startDrawing}
-                  onTouchMove={drawOnCanvas}
-                  onTouchEnd={stopDrawing}
-               />
             </div>
           </div>
         </div>
